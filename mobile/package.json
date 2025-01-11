@@ -1,0 +1,20 @@
+{
+  "name": "video-toolbox-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-native": "^0.72.0",
+    "react-native-paper": "^5.9.1",
+    "react-native-vector-icons": "^9.2.0",
+    "react-native-fs": "^2.20.0",
+    "react-native-share": "^9.2.3",
+    "@react-navigation/native": "^6.1.7",
+    "@react-navigation/native-stack": "^6.9.13"
+  },
+  "scripts": {
+    "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "start": "react-native start"
+  }
+}
