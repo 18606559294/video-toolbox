@@ -3,8 +3,8 @@ const path = require('path');
 const { app } = require('electron');
 const platforms = require('./platforms');
 const EventEmitter = require('events');
-const history = require('./history');
-const auth = require('./auth');
+const History = require('./history');
+const Auth = require('./auth');
 
 class DownloadTask {
   constructor(url, options = {}) {
@@ -19,38 +19,83 @@ class DownloadTask {
     this.resumePosition = 0;
     this.outputPath = '';
     this.info = null;
-    this.priority = options.priority || 0; // 新增：优先级，默认为0
-    this.addedTime = Date.now(); // 新增：添加时间
+    this.priority = options.priority || 0;
+    this.addedTime = Date.now();
   }
 }
 
 class Downloader extends EventEmitter {
   constructor() {
     super();
-    // 创建下载目录
-    this.downloadPath = path.join(app.getPath('downloads'), 'VideoToolbox');
-    if (!fs.existsSync(this.downloadPath)) {
-      fs.mkdirSync(this.downloadPath, { recursive: true });
+    this.initialized = false;
+    this.initPromise = null;
+    this.initOnReady();
+  }
+
+  initOnReady() {
+    this.initPromise = new Promise((resolve) => {
+      if (app.isReady()) {
+        resolve(this.init());
+      } else {
+        app.on('ready', () => {
+          resolve(this.init());
+        });
+      }
+    });
+  }
+
+  async waitForInit() {
+    await this.initPromise;
+    return this;
+  }
+
+  async init() {
+    if (this.initialized) return;
+
+    try {
+      // 创建下载目录
+      this.downloadPath = path.join(app.getPath('downloads'), 'VideoToolbox');
+      if (!fs.existsSync(this.downloadPath)) {
+        fs.mkdirSync(this.downloadPath, { recursive: true });
+      }
+
+      // 初始化服务
+      this.history = new History();
+      await this.history.waitForInit();
+      
+      this.auth = new Auth();
+      await this.auth.waitForInit();
+
+      // 下载队列
+      this.queue = new Map();
+      this.activeDownloads = 0;
+      this.maxConcurrentDownloads = 3;
+      
+      // 下载配置
+      this.chunkSize = 1024 * 1024; // 1MB
+      this.retryAttempts = 3;
+      this.retryDelay = 1000; // 1秒
+
+      // 优先级配置
+      this.priorityLevels = {
+        HIGHEST: 100,
+        HIGH: 75,
+        NORMAL: 50,
+        LOW: 25,
+        LOWEST: 0
+      };
+
+      this.initialized = true;
+    } catch (error) {
+      console.error('Downloader initialization failed:', error);
+      throw error;
     }
+  }
 
-    // 下载队列
-    this.queue = new Map();
-    this.activeDownloads = 0;
-    this.maxConcurrentDownloads = 3;
-    
-    // 下载配置
-    this.chunkSize = 1024 * 1024; // 1MB
-    this.retryAttempts = 3;
-    this.retryDelay = 1000; // 1秒
-
-    // 优先级配置
-    this.priorityLevels = {
-      HIGHEST: 100,
-      HIGH: 75,
-      NORMAL: 50,
-      LOW: 25,
-      LOWEST: 0
-    };
+  async ensureInitialized() {
+    if (!this.initialized) {
+      await this.waitForInit();
+    }
   }
 
   async getVideoInfo(url) {
@@ -66,6 +111,7 @@ class Downloader extends EventEmitter {
   }
 
   async addToQueue(url, options = {}) {
+    await this.ensureInitialized();
     const taskId = this.generateTaskId();
     // 如果没有指定优先级，使用NORMAL
     if (options.priority === undefined) {
@@ -80,9 +126,9 @@ class Downloader extends EventEmitter {
       const platformName = platform.name;
 
       // 检查是否需要登录
-      if (platform.requiresAuth && !auth.isLoggedIn(platformName)) {
+      if (platform.requiresAuth && !this.auth.isLoggedIn(platformName)) {
         // 尝试自动登录
-        const loginSuccess = await auth.login(platformName);
+        const loginSuccess = await this.auth.login(platformName);
         if (!loginSuccess) {
           throw new Error(`需要登录 ${platformName}`);
         }
@@ -111,6 +157,7 @@ class Downloader extends EventEmitter {
   }
 
   async processQueue() {
+    await this.ensureInitialized();
     if (this.activeDownloads >= this.maxConcurrentDownloads) {
       return;
     }
@@ -138,6 +185,7 @@ class Downloader extends EventEmitter {
   }
 
   async startDownload(taskId, task) {
+    await this.ensureInitialized();
     task.status = 'downloading';
     task.startTime = Date.now();
     this.emit('taskStarted', { taskId, task });
@@ -148,8 +196,8 @@ class Downloader extends EventEmitter {
       const platformName = platform.name;
 
       // 检查是否需要登录
-      if (platform.requiresAuth && !auth.isLoggedIn(platformName)) {
-        await auth.login(platformName);
+      if (platform.requiresAuth && !this.auth.isLoggedIn(platformName)) {
+        await this.auth.login(platformName);
       }
 
       const downloader = platform.createDownloader(task);
@@ -173,7 +221,7 @@ class Downloader extends EventEmitter {
       this.emit('taskCompleted', { taskId, task });
 
       // 添加到历史记录
-      history.addDownloadRecord({
+      this.history.addDownloadRecord({
         id: taskId,
         url: task.url,
         title: task.info.title,
@@ -194,7 +242,7 @@ class Downloader extends EventEmitter {
       this.emit('taskError', { taskId, error: error.message });
 
       // 添加到历史记录
-      history.addDownloadRecord({
+      this.history.addDownloadRecord({
         id: taskId,
         url: task.url,
         title: task.info?.title,
@@ -212,6 +260,7 @@ class Downloader extends EventEmitter {
   }
 
   pauseTask(taskId) {
+    this.ensureInitialized();
     const task = this.queue.get(taskId);
     if (task && task.status === 'downloading') {
       this.emit(`pause-${taskId}`);
@@ -219,6 +268,7 @@ class Downloader extends EventEmitter {
   }
 
   resumeTask(taskId) {
+    this.ensureInitialized();
     const task = this.queue.get(taskId);
     if (task && task.status === 'paused') {
       task.status = 'pending';
@@ -227,6 +277,7 @@ class Downloader extends EventEmitter {
   }
 
   cancelTask(taskId) {
+    this.ensureInitialized();
     const task = this.queue.get(taskId);
     if (task) {
       if (task.status === 'downloading') {
@@ -242,6 +293,7 @@ class Downloader extends EventEmitter {
 
   // 批量添加下载任务
   async addBatchToQueue(urls, options = {}) {
+    await this.ensureInitialized();
     const taskIds = [];
     for (const url of urls) {
       try {
@@ -256,11 +308,13 @@ class Downloader extends EventEmitter {
 
   // 获取任务状态
   getTaskStatus(taskId) {
+    this.ensureInitialized();
     return this.queue.get(taskId);
   }
 
   // 获取所有任务状态
   getAllTasks() {
+    this.ensureInitialized();
     return Array.from(this.queue.entries()).map(([taskId, task]) => ({
       taskId,
       ...task
@@ -269,12 +323,14 @@ class Downloader extends EventEmitter {
 
   // 设置最大并发下载数
   setMaxConcurrentDownloads(count) {
+    this.ensureInitialized();
     this.maxConcurrentDownloads = count;
     this.processQueue();
   }
 
   // 清理所有已完成的任务
   clearCompletedTasks() {
+    this.ensureInitialized();
     for (const [taskId, task] of this.queue.entries()) {
       if (task.status === 'completed') {
         this.queue.delete(taskId);
@@ -288,6 +344,7 @@ class Downloader extends EventEmitter {
 
   // 设置任务优先级
   setPriority(taskId, priority) {
+    this.ensureInitialized();
     const task = this.queue.get(taskId);
     if (task) {
       const oldPriority = task.priority;
@@ -316,6 +373,7 @@ class Downloader extends EventEmitter {
 
   // 批量设置优先级
   setBatchPriority(taskIds, priority) {
+    this.ensureInitialized();
     for (const taskId of taskIds) {
       this.setPriority(taskId, priority);
     }
@@ -323,11 +381,13 @@ class Downloader extends EventEmitter {
 
   // 获取预定义的优先级级别
   getPriorityLevels() {
+    this.ensureInitialized();
     return this.priorityLevels;
   }
 
   // 按优先级获取任务
   getTasksByPriority(priority) {
+    this.ensureInitialized();
     return Array.from(this.queue.entries())
       .filter(([_, task]) => task.priority === priority)
       .map(([taskId, task]) => ({ taskId, ...task }));
@@ -335,12 +395,14 @@ class Downloader extends EventEmitter {
 
   // 获取任务的优先级
   getTaskPriority(taskId) {
+    this.ensureInitialized();
     const task = this.queue.get(taskId);
     return task ? task.priority : null;
   }
 
   // 提升任务优先级
   increasePriority(taskId) {
+    this.ensureInitialized();
     const task = this.queue.get(taskId);
     if (task) {
       const currentPriority = task.priority;
@@ -355,6 +417,7 @@ class Downloader extends EventEmitter {
 
   // 降低任务优先级
   decreasePriority(taskId) {
+    this.ensureInitialized();
     const task = this.queue.get(taskId);
     if (task) {
       const currentPriority = task.priority;
@@ -369,6 +432,7 @@ class Downloader extends EventEmitter {
 
   // 获取队列统计信息
   getQueueStats() {
+    this.ensureInitialized();
     const stats = {
       total: this.queue.size,
       active: 0,
@@ -411,4 +475,5 @@ class Downloader extends EventEmitter {
   }
 }
 
-module.exports = new Downloader();
+// 导出 Downloader 类而不是实例
+module.exports = Downloader;

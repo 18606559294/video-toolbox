@@ -8,34 +8,74 @@ const keytar = require('keytar');
 class Auth extends EventEmitter {
   constructor() {
     super();
-    // 创建凭证存储目录
-    this.credentialsPath = path.join(app.getPath('userData'), 'credentials');
-    if (!fs.existsSync(this.credentialsPath)) {
-      fs.mkdirSync(this.credentialsPath, { recursive: true });
-    }
-
-    // 平台凭证文件
-    this.platformsFile = path.join(this.credentialsPath, 'platforms.json');
-
-    // 加载平台凭证
-    this.platforms = this.loadPlatforms();
-
-    // 登录状态
+    this.initialized = false;
+    this.initPromise = null;
+    this.credentialsPath = null;
+    this.platformsFile = null;
+    this.platforms = {};
     this.loginStatus = new Map();
-
-    // 自动登录间隔（12小时）
     this.autoLoginInterval = 12 * 60 * 60 * 1000;
-
-    // 登录重试配置
     this.maxRetries = 3;
     this.retryDelay = 5000; // 5秒
 
-    // 开始自动登录检查
-    this.setupAutoLogin();
+    this.initPromise = new Promise((resolve) => {
+      if (app.isReady()) {
+        resolve(this.init());
+      } else {
+        app.on('ready', () => {
+          resolve(this.init());
+        });
+      }
+    });
+  }
+
+  async waitForInit() {
+    await this.initPromise;
+    return this;
+  }
+
+  async init() {
+    if (this.initialized) return;
+
+    try {
+      this.credentialsPath = path.join(app.getPath('userData'), 'credentials');
+      if (!fs.existsSync(this.credentialsPath)) {
+        fs.mkdirSync(this.credentialsPath, { recursive: true });
+      }
+
+      this.platformsFile = path.join(this.credentialsPath, 'platforms.json');
+
+      // 加载平台凭证
+      this.platforms = await this.loadPlatforms();
+
+      // 登录状态
+      this.loginStatus = new Map();
+
+      // 自动登录间隔（12小时）
+      this.autoLoginInterval = 12 * 60 * 60 * 1000;
+
+      // 登录重试配置
+      this.maxRetries = 3;
+      this.retryDelay = 5000; // 5秒
+
+      // 开始自动登录检查
+      this.setupAutoLogin();
+
+      this.initialized = true;
+    } catch (error) {
+      console.error('Auth initialization failed:', error);
+      throw error;
+    }
+  }
+
+  async ensureInitialized() {
+    if (!this.initialized) {
+      await this.waitForInit();
+    }
   }
 
   // 加载平台凭证
-  loadPlatforms() {
+  async loadPlatforms() {
     try {
       if (fs.existsSync(this.platformsFile)) {
         return JSON.parse(fs.readFileSync(this.platformsFile, 'utf8'));
@@ -47,7 +87,7 @@ class Auth extends EventEmitter {
   }
 
   // 保存平台凭证
-  savePlatforms() {
+  async savePlatforms() {
     try {
       fs.writeFileSync(this.platformsFile, JSON.stringify(this.platforms, null, 2));
     } catch (error) {
@@ -58,6 +98,7 @@ class Auth extends EventEmitter {
 
   // 加密敏感信息
   async encrypt(text) {
+    await this.ensureInitialized();
     const key = await this.getEncryptionKey();
     const iv = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -73,6 +114,7 @@ class Auth extends EventEmitter {
 
   // 解密敏感信息
   async decrypt(encrypted, iv, authTag) {
+    await this.ensureInitialized();
     const key = await this.getEncryptionKey();
     const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'hex'));
     decipher.setAuthTag(Buffer.from(authTag, 'hex'));
@@ -83,6 +125,7 @@ class Auth extends EventEmitter {
 
   // 获取加密密钥
   async getEncryptionKey() {
+    await this.ensureInitialized();
     let key = await keytar.getPassword('video-toolbox', 'encryption-key');
     if (!key) {
       key = crypto.randomBytes(32).toString('hex');
@@ -93,6 +136,7 @@ class Auth extends EventEmitter {
 
   // 添加平台凭证
   async addPlatformCredentials(platform, credentials) {
+    await this.ensureInitialized();
     try {
       const { username, password, cookies, token } = credentials;
       const encrypted = {};
@@ -114,7 +158,7 @@ class Auth extends EventEmitter {
         autoLogin: true
       };
 
-      this.savePlatforms();
+      await this.savePlatforms();
       this.emit('credentialsAdded', { platform });
       return true;
     } catch (error) {
@@ -125,10 +169,11 @@ class Auth extends EventEmitter {
   }
 
   // 移除平台凭证
-  removePlatformCredentials(platform) {
+  async removePlatformCredentials(platform) {
+    await this.ensureInitialized();
     if (this.platforms[platform]) {
       delete this.platforms[platform];
-      this.savePlatforms();
+      await this.savePlatforms();
       this.loginStatus.delete(platform);
       this.emit('credentialsRemoved', { platform });
       return true;
@@ -138,6 +183,7 @@ class Auth extends EventEmitter {
 
   // 获取平台凭证
   async getPlatformCredentials(platform) {
+    await this.ensureInitialized();
     try {
       const credentials = this.platforms[platform];
       if (!credentials) return null;
@@ -178,6 +224,7 @@ class Auth extends EventEmitter {
 
   // 更新平台凭证
   async updatePlatformCredentials(platform, credentials) {
+    await this.ensureInitialized();
     if (this.platforms[platform]) {
       await this.addPlatformCredentials(platform, credentials);
       this.emit('credentialsUpdated', { platform });
@@ -187,7 +234,8 @@ class Auth extends EventEmitter {
   }
 
   // 获取所有平台
-  getPlatforms() {
+  async getPlatforms() {
+    await this.ensureInitialized();
     return Object.keys(this.platforms).map(platform => ({
       platform,
       username: this.platforms[platform].username,
@@ -197,10 +245,11 @@ class Auth extends EventEmitter {
   }
 
   // 设置自动登录
-  setAutoLogin(platform, enabled) {
+  async setAutoLogin(platform, enabled) {
+    await this.ensureInitialized();
     if (this.platforms[platform]) {
       this.platforms[platform].autoLogin = enabled;
-      this.savePlatforms();
+      await this.savePlatforms();
       this.emit('autoLoginChanged', { platform, enabled });
       return true;
     }
@@ -209,6 +258,7 @@ class Auth extends EventEmitter {
 
   // 执行登录
   async login(platform, force = false) {
+    await this.ensureInitialized();
     try {
       // 检查是否已登录且未过期
       const status = this.loginStatus.get(platform);
@@ -236,7 +286,7 @@ class Auth extends EventEmitter {
 
           // 更新最后登录时间
           this.platforms[platform].lastLogin = Date.now();
-          this.savePlatforms();
+          await this.savePlatforms();
 
           this.emit('loginSuccess', { platform });
           return true;
@@ -262,6 +312,7 @@ class Auth extends EventEmitter {
 
   // 执行登出
   async logout(platform) {
+    await this.ensureInitialized();
     try {
       const platformModule = require(`./platforms/${platform}`);
       await platformModule.logout();
@@ -276,13 +327,15 @@ class Auth extends EventEmitter {
   }
 
   // 检查登录状态
-  isLoggedIn(platform) {
+  async isLoggedIn(platform) {
+    await this.ensureInitialized();
     const status = this.loginStatus.get(platform);
     return status?.loggedIn && Date.now() - status.timestamp < this.autoLoginInterval;
   }
 
   // 获取登录状态
-  getLoginStatus(platform) {
+  async getLoginStatus(platform) {
+    await this.ensureInitialized();
     return this.loginStatus.get(platform) || {
       loggedIn: false,
       timestamp: null,
@@ -291,7 +344,8 @@ class Auth extends EventEmitter {
   }
 
   // 设置自动登录检查
-  setupAutoLogin() {
+  async setupAutoLogin() {
+    await this.ensureInitialized();
     // 每小时检查一次登录状态
     setInterval(() => {
       Object.keys(this.platforms).forEach(platform => {
@@ -305,6 +359,7 @@ class Auth extends EventEmitter {
 
   // 导出凭证
   async exportCredentials(password) {
+    await this.ensureInitialized();
     try {
       const encrypted = await this.encrypt(JSON.stringify(this.platforms));
       return {
@@ -320,6 +375,7 @@ class Auth extends EventEmitter {
 
   // 导入凭证
   async importCredentials(data, password) {
+    await this.ensureInitialized();
     try {
       const decrypted = await this.decrypt(
         data.data.encrypted,
@@ -336,7 +392,7 @@ class Auth extends EventEmitter {
       }
 
       this.platforms = platforms;
-      this.savePlatforms();
+      await this.savePlatforms();
       this.emit('credentialsImported');
       return true;
     } catch (error) {
@@ -347,4 +403,4 @@ class Auth extends EventEmitter {
   }
 }
 
-module.exports = new Auth();
+module.exports = Auth;

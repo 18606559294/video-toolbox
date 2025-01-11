@@ -10,23 +10,42 @@ import {
   Tabs,
   LinearProgress,
   Card,
-  CardContent
+  CardContent,
+  InputAdornment,
+  IconButton
 } from '@mui/material';
 import { 
   CloudDownload, 
   Transform, 
-  ContentCut 
+  ContentCut,
+  ContentPaste
 } from '@mui/icons-material';
+import useTranslation from './hooks/useTranslation';
+import LanguageSelector from './components/LanguageSelector';
 
 const { ipcRenderer } = window.require('electron');
 
 function App() {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState(0);
   const [url, setUrl] = useState('');
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [videoInfo, setVideoInfo] = useState(null);
   const [error, setError] = useState(null);
+  const [translations, setTranslations] = useState({
+    title: '视频工具箱',
+    downloadTab: '下载视频',
+    convertTab: '格式转换',
+    editTab: '视频编辑',
+    urlLabel: '视频链接',
+    urlPlaceholder: '在此粘贴视频链接',
+    downloadButton: '下载',
+    getInfoButton: '获取信息',
+    progress: '下载进度',
+    error: '错误',
+    pasteButton: '粘贴'
+  });
 
   useEffect(() => {
     // 监听下载进度
@@ -38,6 +57,28 @@ function App() {
       ipcRenderer.removeAllListeners('download-progress');
     };
   }, []);
+
+  useEffect(() => {
+    // 更新翻译
+    const updateTranslations = async () => {
+      const newTranslations = {
+        title: await t('common.title'),
+        downloadTab: await t('download.title'),
+        convertTab: await t('convert.title'),
+        editTab: await t('common.edit'),
+        urlLabel: await t('download.url'),
+        urlPlaceholder: await t('download.urlPlaceholder'),
+        downloadButton: await t('download.start'),
+        getInfoButton: await t('download.getInfo'),
+        progress: await t('download.progress'),
+        error: await t('common.error'),
+        pasteButton: await t('common.paste')
+      };
+      setTranslations(newTranslations);
+    };
+
+    updateTranslations();
+  }, [t]);
 
   const handleGetInfo = async () => {
     if (!url) return;
@@ -74,18 +115,30 @@ function App() {
     }
   };
 
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setUrl(text);
+    } catch (error) {
+      console.error('Failed to paste:', error);
+    }
+  };
+
   return (
     <Container maxWidth="md">
       <Box sx={{ mt: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          视频工具箱
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4" component="h1">
+            {translations.title}
+          </Typography>
+          <LanguageSelector />
+        </Box>
 
         <Paper sx={{ mt: 3 }}>
           <Tabs value={activeTab} onChange={(e, v) => setActiveTab(v)}>
-            <Tab icon={<CloudDownload />} label="下载视频" />
-            <Tab icon={<Transform />} label="格式转换" />
-            <Tab icon={<ContentCut />} label="视频编辑" />
+            <Tab icon={<CloudDownload />} label={translations.downloadTab} />
+            <Tab icon={<Transform />} label={translations.convertTab} />
+            <Tab icon={<ContentCut />} label={translations.editTab} />
           </Tabs>
 
           <Box sx={{ p: 3 }}>
@@ -93,68 +146,70 @@ function App() {
               <Box>
                 <TextField
                   fullWidth
-                  label="视频链接"
+                  label={translations.urlLabel}
+                  placeholder={translations.urlPlaceholder}
                   variant="outlined"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   sx={{ mb: 2 }}
+                  InputProps={{
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton onClick={handlePaste} edge="end">
+                          <ContentPaste />
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  }}
                 />
-                
-                <Box sx={{ mb: 2 }}>
+
+                <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
                   <Button
-                    variant="outlined"
+                    variant="contained"
                     onClick={handleGetInfo}
-                    disabled={downloading || !url}
-                    sx={{ mr: 1 }}
+                    disabled={!url || downloading}
                   >
-                    获取视频信息
+                    {translations.getInfoButton}
                   </Button>
                   <Button
                     variant="contained"
+                    color="primary"
                     startIcon={<CloudDownload />}
                     onClick={handleDownload}
-                    disabled={downloading || !url}
+                    disabled={!url || downloading}
                   >
-                    {downloading ? '下载中...' : '开始下载'}
+                    {translations.downloadButton}
                   </Button>
                 </Box>
 
+                {downloading && (
+                  <Box sx={{ mb: 2 }}>
+                    <Typography variant="body2" color="textSecondary" gutterBottom>
+                      {translations.progress}: {Math.round(progress)}%
+                    </Typography>
+                    <LinearProgress variant="determinate" value={progress} />
+                  </Box>
+                )}
+
                 {error && (
                   <Typography color="error" sx={{ mb: 2 }}>
-                    错误: {error}
+                    {translations.error}: {error}
                   </Typography>
                 )}
 
                 {videoInfo && (
                   <Card sx={{ mb: 2 }}>
                     <CardContent>
-                      <Typography variant="h6">视频信息</Typography>
-                      <Typography>标题: {videoInfo.title}</Typography>
-                      <Typography>时长: {videoInfo.duration}秒</Typography>
+                      <Typography variant="h6" gutterBottom>
+                        {videoInfo.title}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {videoInfo.description}
+                      </Typography>
                     </CardContent>
                   </Card>
                 )}
-
-                {downloading && (
-                  <Box sx={{ width: '100%' }}>
-                    <LinearProgress 
-                      variant="determinate" 
-                      value={progress * 100} 
-                    />
-                    <Typography align="center" sx={{ mt: 1 }}>
-                      {Math.round(progress * 100)}%
-                    </Typography>
-                  </Box>
-                )}
               </Box>
-            )}
-
-            {activeTab === 1 && (
-              <Typography>格式转换功能开发中...</Typography>
-            )}
-
-            {activeTab === 2 && (
-              <Typography>视频编辑功能开发中...</Typography>
             )}
           </Box>
         </Paper>

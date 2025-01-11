@@ -1,20 +1,25 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
-const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const path = require('path');
 const fs = require('fs');
 const isDev = process.env.NODE_ENV !== 'production';
-const downloader = require('./services/downloader');
+const Downloader = require('./services/downloader');
+const I18nService = require('./services/i18n');
+
+if (require('electron-squirrel-startup')) {
+  app.quit();
+}
 
 // 配置日志
 log.transports.file.level = 'info';
-autoUpdater.logger = log;
 
 // 主窗口
-let mainWindow;
+let mainWindow = null;
+let downloader = null;
+let i18n = null;
 
 // 创建窗口
-function createWindow() {
+const createWindow = () => {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -30,94 +35,139 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../build/index.html'));
   }
-}
+};
 
-// 应用程序准备就绪
-app.whenReady().then(() => {
-  createWindow();
+// 初始化应用
+app.on('ready', async () => {
+  try {
+    // 初始化服务
+    const i18nService = new I18nService();
+    await i18nService.init();
 
-  // 检查更新
-  if (process.env.NODE_ENV !== 'development') {
-    autoUpdater.checkForUpdatesAndNotify();
-  }
+    // 设置初始语言为系统语言
+    const systemLanguage = app.getLocale();
+    let initialLanguage = 'en'; // 默认英语
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+    // 根据系统语言设置应用语言
+    if (systemLanguage.startsWith('zh')) {
+      initialLanguage = 'zh-CN';
+    } else if (systemLanguage.startsWith('ja')) {
+      initialLanguage = 'ja';
+    } else if (systemLanguage.startsWith('ko')) {
+      initialLanguage = 'ko';
     }
-  });
+
+    await i18nService.changeLanguage(initialLanguage);
+
+    i18n = i18nService;
+    downloader = new Downloader();
+    await downloader.waitForInit();
+
+    createWindow();
+
+    // 检查更新
+    if (!isDev) {
+      const { autoUpdater } = require('electron-updater');
+      autoUpdater.logger = log;
+      autoUpdater.checkForUpdatesAndNotify();
+    }
+  } catch (error) {
+    console.error('Application initialization failed:', error);
+    app.quit();
+  }
 });
 
-// 所有窗口关闭时退出应用
+// 当所有窗口关闭时退出应用
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
   }
 });
 
-// 自动更新事件处理
-autoUpdater.on('checking-for-update', () => {
-  log.info('正在检查更新...');
-  mainWindow.webContents.send('update-message', { type: 'checking' });
-});
-
-autoUpdater.on('update-available', (info) => {
-  log.info('发现新版本:', info);
-  mainWindow.webContents.send('update-message', { 
-    type: 'available',
-    version: info.version
-  });
-});
-
-autoUpdater.on('update-not-available', (info) => {
-  log.info('当前是最新版本');
-  mainWindow.webContents.send('update-message', { type: 'not-available' });
-});
-
-autoUpdater.on('error', (err) => {
-  log.error('更新错误:', err);
-  mainWindow.webContents.send('update-message', { 
-    type: 'error',
-    error: err.message
-  });
-});
-
-autoUpdater.on('download-progress', (progressObj) => {
-  let logMessage = `下载速度: ${progressObj.bytesPerSecond}`;
-  logMessage = `${logMessage} - 已下载 ${progressObj.percent}%`;
-  logMessage = `${logMessage} (${progressObj.transferred}/${progressObj.total})`;
-  log.info(logMessage);
-  mainWindow.webContents.send('update-message', { 
-    type: 'progress',
-    progress: progressObj
-  });
-});
-
-autoUpdater.on('update-downloaded', (info) => {
-  log.info('更新下载完成');
-  mainWindow.webContents.send('update-message', { 
-    type: 'downloaded',
-    version: info.version
-  });
-});
-
-// 处理渲染进程的更新请求
-ipcMain.on('check-for-update', () => {
-  if (process.env.NODE_ENV !== 'development') {
-    autoUpdater.checkForUpdates();
+// 在 macOS 上，当点击 dock 图标并且没有其他窗口打开时，
+// 重新创建一个窗口。
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
   }
 });
 
-ipcMain.on('restart-app', () => {
-  autoUpdater.quitAndInstall();
+// 自动更新事件处理
+if (!isDev) {
+  const { autoUpdater } = require('electron-updater');
+  autoUpdater.on('checking-for-update', () => {
+    log.info('正在检查更新...');
+    mainWindow.webContents.send('update-message', { type: 'checking' });
+  });
+
+  autoUpdater.on('update-available', (info) => {
+    log.info('发现新版本:', info);
+    mainWindow.webContents.send('update-message', { 
+      type: 'available',
+      version: info.version
+    });
+  });
+
+  autoUpdater.on('update-not-available', (info) => {
+    log.info('当前是最新版本');
+    mainWindow.webContents.send('update-message', { type: 'not-available' });
+  });
+
+  autoUpdater.on('error', (err) => {
+    log.error('更新错误:', err);
+    mainWindow.webContents.send('update-message', { 
+      type: 'error',
+      error: err.message
+    });
+  });
+
+  autoUpdater.on('download-progress', (progressObj) => {
+    let logMessage = `下载速度: ${progressObj.bytesPerSecond}`;
+    logMessage = `${logMessage} - 已下载 ${progressObj.percent}%`;
+    logMessage = `${logMessage} (${progressObj.transferred}/${progressObj.total})`;
+    log.info(logMessage);
+    mainWindow.webContents.send('update-message', { 
+      type: 'progress',
+      progress: progressObj
+    });
+  });
+
+  autoUpdater.on('update-downloaded', (info) => {
+    log.info('更新下载完成');
+    mainWindow.webContents.send('update-message', { 
+      type: 'downloaded',
+      version: info.version
+    });
+  });
+}
+
+// IPC 通信处理
+// 语言相关
+ipcMain.handle('get-current-language', async () => {
+  return await i18n.getCurrentLanguage();
 });
 
-// 获取支持的平台列表
+ipcMain.handle('get-supported-languages', async () => {
+  return await i18n.getSupportedLanguages();
+});
+
+ipcMain.handle('change-language', async (event, language) => {
+  const success = await i18n.changeLanguage(language);
+  if (success) {
+    mainWindow.webContents.send('language-changed', language);
+  }
+  return success;
+});
+
+ipcMain.handle('get-translation', async (event, key, options) => {
+  return await i18n.t(key, options);
+});
+
+// 下载相关
 ipcMain.handle('get-supported-platforms', () => {
   return downloader.getSupportedPlatforms();
 });
 
-// 获取视频信息
 ipcMain.handle('get-video-info', async (event, url) => {
   try {
     return await downloader.getVideoInfo(url);
@@ -126,7 +176,6 @@ ipcMain.handle('get-video-info', async (event, url) => {
   }
 });
 
-// 处理视频下载
 ipcMain.handle('download-video', async (event, { url, options }) => {
   try {
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -176,6 +225,21 @@ ipcMain.handle('cleanup-temp', async () => {
   } catch (error) {
     log.error('Failed to cleanup temp files:', error);
     throw error;
+  }
+});
+
+// 处理渲染进程的更新请求
+ipcMain.on('check-for-update', () => {
+  if (!isDev) {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.checkForUpdates();
+  }
+});
+
+ipcMain.on('restart-app', () => {
+  if (!isDev) {
+    const { autoUpdater } = require('electron-updater');
+    autoUpdater.quitAndInstall();
   }
 });
 

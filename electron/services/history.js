@@ -6,26 +6,62 @@ const EventEmitter = require('events');
 class History extends EventEmitter {
   constructor() {
     super();
-    // 创建历史记录目录
-    this.historyPath = path.join(app.getPath('userData'), 'history');
-    if (!fs.existsSync(this.historyPath)) {
-      fs.mkdirSync(this.historyPath, { recursive: true });
-    }
-
-    // 历史记录文件路径
-    this.downloadHistoryFile = path.join(this.historyPath, 'downloads.json');
-    this.convertHistoryFile = path.join(this.historyPath, 'conversions.json');
-
-    // 初始化历史记录
-    this.downloadHistory = this.loadHistory(this.downloadHistoryFile);
-    this.convertHistory = this.loadHistory(this.convertHistoryFile);
-
-    // 自动保存间隔（5分钟）
-    this.autoSaveInterval = 5 * 60 * 1000;
-    this.setupAutoSave();
-
-    // 最大历史记录数量
+    this.initialized = false;
+    this.initPromise = null;
+    this.downloadHistory = [];
+    this.convertHistory = [];
     this.maxHistoryItems = 1000;
+    this.autoSaveInterval = 5 * 60 * 1000; // 5分钟
+
+    // 创建初始化 Promise
+    this.initPromise = new Promise((resolve) => {
+      if (app.isReady()) {
+        resolve(this.init());
+      } else {
+        app.on('ready', () => {
+          resolve(this.init());
+        });
+      }
+    });
+  }
+
+  async waitForInit() {
+    await this.initPromise;
+    return this;
+  }
+
+  init() {
+    if (this.initialized) return;
+
+    try {
+      // 创建历史记录目录
+      this.historyPath = path.join(app.getPath('userData'), 'history');
+      if (!fs.existsSync(this.historyPath)) {
+        fs.mkdirSync(this.historyPath, { recursive: true });
+      }
+
+      // 历史记录文件路径
+      this.downloadHistoryFile = path.join(this.historyPath, 'downloads.json');
+      this.convertHistoryFile = path.join(this.historyPath, 'conversions.json');
+
+      // 初始化历史记录
+      this.downloadHistory = this.loadHistory(this.downloadHistoryFile) || [];
+      this.convertHistory = this.loadHistory(this.convertHistoryFile) || [];
+
+      // 设置自动保存
+      this.setupAutoSave();
+
+      this.initialized = true;
+    } catch (error) {
+      console.error('History initialization failed:', error);
+      throw error;
+    }
+  }
+
+  async ensureInitialized() {
+    if (!this.initialized) {
+      await this.waitForInit();
+    }
   }
 
   // 加载历史记录
@@ -42,7 +78,8 @@ class History extends EventEmitter {
   }
 
   // 保存历史记录
-  saveHistory(filePath, history) {
+  async saveHistory(filePath, history) {
+    await this.ensureInitialized();
     try {
       fs.writeFileSync(filePath, JSON.stringify(history, null, 2), 'utf8');
       this.emit('historySaved', { type: path.basename(filePath, '.json') });
@@ -54,38 +91,46 @@ class History extends EventEmitter {
 
   // 设置自动保存
   setupAutoSave() {
-    setInterval(() => {
-      this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
-      this.saveHistory(this.convertHistoryFile, this.convertHistory);
-    }, this.autoSaveInterval);
+    if (this.autoSaveInterval) {
+      setInterval(async () => {
+        if (this.initialized) {
+          await this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
+          await this.saveHistory(this.convertHistoryFile, this.convertHistory);
+        }
+      }, this.autoSaveInterval);
+    }
   }
 
   // 添加下载记录
-  addDownloadRecord(record) {
+  async addDownloadRecord(record) {
+    await this.ensureInitialized();
     const downloadRecord = {
       ...record,
       timestamp: Date.now(),
-      type: 'download'
+      id: record.id || Date.now().toString()
     };
 
     this.downloadHistory.unshift(downloadRecord);
     this.trimHistory(this.downloadHistory);
-    this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
+    await this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
     this.emit('downloadRecordAdded', downloadRecord);
+    return downloadRecord;
   }
 
   // 添加转换记录
-  addConvertRecord(record) {
+  async addConvertRecord(record) {
+    await this.ensureInitialized();
     const convertRecord = {
       ...record,
       timestamp: Date.now(),
-      type: 'convert'
+      id: record.id || Date.now().toString()
     };
 
     this.convertHistory.unshift(convertRecord);
     this.trimHistory(this.convertHistory);
-    this.saveHistory(this.convertHistoryFile, this.convertHistory);
+    await this.saveHistory(this.convertHistoryFile, this.convertHistory);
     this.emit('convertRecordAdded', convertRecord);
+    return convertRecord;
   }
 
   // 限制历史记录数量
@@ -96,12 +141,14 @@ class History extends EventEmitter {
   }
 
   // 获取下载历史
-  getDownloadHistory(options = {}) {
+  async getDownloadHistory(options = {}) {
+    await this.ensureInitialized();
     return this.filterHistory(this.downloadHistory, options);
   }
 
   // 获取转换历史
-  getConvertHistory(options = {}) {
+  async getConvertHistory(options = {}) {
+    await this.ensureInitialized();
     return this.filterHistory(this.convertHistory, options);
   }
 
@@ -122,60 +169,70 @@ class History extends EventEmitter {
       filtered = filtered.filter(record => record.status === options.status);
     }
 
-    // 按关键词搜索
-    if (options.keyword) {
-      const keyword = options.keyword.toLowerCase();
-      filtered = filtered.filter(record => {
-        return record.title?.toLowerCase().includes(keyword) ||
-               record.url?.toLowerCase().includes(keyword) ||
-               record.outputPath?.toLowerCase().includes(keyword);
+    // 按搜索关键词过滤
+    if (options.search) {
+      const searchLower = options.search.toLowerCase();
+      filtered = filtered.filter(record =>
+        record.title?.toLowerCase().includes(searchLower) ||
+        record.url?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // 排序
+    if (options.sortBy) {
+      filtered.sort((a, b) => {
+        const aValue = a[options.sortBy];
+        const bValue = b[options.sortBy];
+        return options.sortDesc ? bValue - aValue : aValue - bValue;
       });
     }
 
     // 分页
-    if (options.page && options.pageSize) {
-      const start = (options.page - 1) * options.pageSize;
-      filtered = filtered.slice(start, start + options.pageSize);
+    if (options.page && options.limit) {
+      const start = (options.page - 1) * options.limit;
+      filtered = filtered.slice(start, start + options.limit);
     }
 
     return filtered;
   }
 
   // 清除指定日期之前的历史记录
-  clearHistoryBefore(timestamp, type = 'all') {
+  async clearHistoryBefore(timestamp, type = 'all') {
+    await this.ensureInitialized();
     if (type === 'all' || type === 'download') {
       this.downloadHistory = this.downloadHistory.filter(
         record => record.timestamp >= timestamp
       );
-      this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
+      await this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
     }
 
     if (type === 'all' || type === 'convert') {
       this.convertHistory = this.convertHistory.filter(
         record => record.timestamp >= timestamp
       );
-      this.saveHistory(this.convertHistoryFile, this.convertHistory);
+      await this.saveHistory(this.convertHistoryFile, this.convertHistory);
     }
 
     this.emit('historyCleared', { type, timestamp });
   }
 
   // 删除单条历史记录
-  deleteRecord(recordId, type) {
+  async deleteRecord(recordId, type) {
+    await this.ensureInitialized();
     let deleted = false;
     
     if (type === 'download') {
       const index = this.downloadHistory.findIndex(record => record.id === recordId);
       if (index !== -1) {
         this.downloadHistory.splice(index, 1);
-        this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
+        await this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
         deleted = true;
       }
     } else if (type === 'convert') {
       const index = this.convertHistory.findIndex(record => record.id === recordId);
       if (index !== -1) {
         this.convertHistory.splice(index, 1);
-        this.saveHistory(this.convertHistoryFile, this.convertHistory);
+        await this.saveHistory(this.convertHistoryFile, this.convertHistory);
         deleted = true;
       }
     }
@@ -188,7 +245,8 @@ class History extends EventEmitter {
   }
 
   // 获取历史记录统计信息
-  getStats() {
+  async getStats() {
+    await this.ensureInitialized();
     const downloadStats = {
       total: this.downloadHistory.length,
       completed: 0,
@@ -231,7 +289,8 @@ class History extends EventEmitter {
   }
 
   // 导出历史记录
-  exportHistory(type = 'all') {
+  async exportHistory(type = 'all') {
+    await this.ensureInitialized();
     const exportData = {
       timestamp: Date.now(),
       type: type
@@ -249,18 +308,19 @@ class History extends EventEmitter {
   }
 
   // 导入历史记录
-  importHistory(data) {
+  async importHistory(data) {
+    await this.ensureInitialized();
     try {
       if (data.downloads && (data.type === 'all' || data.type === 'download')) {
         this.downloadHistory = [...data.downloads, ...this.downloadHistory];
         this.trimHistory(this.downloadHistory);
-        this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
+        await this.saveHistory(this.downloadHistoryFile, this.downloadHistory);
       }
 
       if (data.conversions && (data.type === 'all' || data.type === 'convert')) {
         this.convertHistory = [...data.conversions, ...this.convertHistory];
         this.trimHistory(this.convertHistory);
-        this.saveHistory(this.convertHistoryFile, this.convertHistory);
+        await this.saveHistory(this.convertHistoryFile, this.convertHistory);
       }
 
       this.emit('historyImported', {
@@ -277,4 +337,5 @@ class History extends EventEmitter {
   }
 }
 
-module.exports = new History();
+// 导出 History 类
+module.exports = History;
