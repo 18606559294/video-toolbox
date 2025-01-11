@@ -1,6 +1,6 @@
 {
   "name": "video-toolbox",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A powerful video download and conversion tool",
   "main": "electron/main.js",
   "scripts": {
@@ -44,18 +44,24 @@
       {
         "from": "build/bin",
         "to": "bin",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
@@ -88,6 +94,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "check-disk-space": "^3.4.0",
     "electron-log": "^5.0.1",
     "electron-updater": "^6.1.7",
     "extract-zip": "^2.0.1",

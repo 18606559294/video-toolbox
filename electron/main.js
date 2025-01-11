@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
 const path = require('path');
+const fs = require('fs');
 const isDev = process.env.NODE_ENV !== 'production';
 const downloader = require('./services/downloader');
 
@@ -145,3 +146,44 @@ ipcMain.handle('download-video', async (event, { url, options }) => {
 ipcMain.handle('convert-video', async (event, { input, format }) => {
   // TODO: 实现视频转换逻辑
 });
+
+// 添加新功能：检查下载目录空间
+ipcMain.handle('check-disk-space', async () => {
+  const downloadPath = app.getPath('downloads');
+  try {
+    const { free } = await checkDiskSpace(downloadPath);
+    return {
+      available: free,
+      formatted: `${Math.round(free / 1024 / 1024 / 1024)} GB`
+    };
+  } catch (error) {
+    log.error('Failed to check disk space:', error);
+    throw error;
+  }
+});
+
+// 添加新功能：清理临时文件
+ipcMain.handle('cleanup-temp', async () => {
+  const tempPath = app.getPath('temp');
+  try {
+    const files = await fs.readdir(tempPath);
+    for (const file of files) {
+      if (file.startsWith('video-toolbox-')) {
+        await fs.unlink(path.join(tempPath, file));
+      }
+    }
+    return true;
+  } catch (error) {
+    log.error('Failed to cleanup temp files:', error);
+    throw error;
+  }
+});
+
+// disk space checking function
+async function checkDiskSpace(path) {
+  const stats = await fs.promises.statvfs(path);
+  return {
+    free: stats.f_bsize * stats.f_bfree,
+    total: stats.f_bsize * stats.f_blocks,
+  };
+}
