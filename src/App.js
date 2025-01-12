@@ -144,71 +144,72 @@ function App() {
           <Box sx={{ p: 3 }}>
             {activeTab === 0 && (
               <Box>
-                <TextField
-                  fullWidth
-                  label={translations.urlLabel}
-                  placeholder={translations.urlPlaceholder}
-                  variant="outlined"
-                  value={url}
-                  onChange={(e) => setUrl(e.target.value)}
-                  sx={{ mb: 2 }}
-                  InputProps={{
-                    endAdornment: (
-                      <InputAdornment position="end">
-                        <IconButton onClick={handlePaste} edge="end">
-                          <ContentPaste />
-                        </IconButton>
-                      </InputAdornment>
-                    ),
-                  }}
-                />
-
-                <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-                  <Button
-                    variant="contained"
-                    onClick={handleGetInfo}
-                    disabled={!url || downloading}
-                  >
-                    {translations.getInfoButton}
-                  </Button>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={<CloudDownload />}
-                    onClick={handleDownload}
-                    disabled={!url || downloading}
-                  >
-                    {translations.downloadButton}
-                  </Button>
-                </Box>
-
-                {downloading && (
-                  <Box sx={{ mb: 2 }}>
-                    <Typography variant="body2" color="textSecondary" gutterBottom>
-                      {translations.progress}: {Math.round(progress)}%
-                    </Typography>
-                    <LinearProgress variant="determinate" value={progress} />
+                <Card title="视频下载" extra={<Typography variant="body2" color="textSecondary">支持抖音、YouTube等多个平台</Typography>}>
+                  <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <Typography variant="body1" strong>第一步：粘贴视频链接</Typography>
+                    <TextField
+                      fullWidth
+                      label={translations.urlLabel}
+                      placeholder={translations.urlPlaceholder}
+                      variant="outlined"
+                      value={url}
+                      onChange={(e) => setUrl(e.target.value)}
+                      sx={{ mb: 2 }}
+                      InputProps={{
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <IconButton onClick={handlePaste} edge="end">
+                              <ContentPaste />
+                            </IconButton>
+                          </InputAdornment>
+                        ),
+                      }}
+                    />
+                    <Box sx={{ display: 'flex', gap: 2 }}>
+                      <Button
+                        variant="contained"
+                        onClick={handleGetInfo}
+                        disabled={!url || downloading}
+                      >
+                        {translations.getInfoButton}
+                      </Button>
+                      <Button
+                        variant="contained"
+                        color="primary"
+                        startIcon={<CloudDownload />}
+                        onClick={handleDownload}
+                        disabled={!url || downloading}
+                      >
+                        {translations.downloadButton}
+                      </Button>
+                    </Box>
+                    {downloading && (
+                      <Box sx={{ mb: 2 }}>
+                        <Typography variant="body2" color="textSecondary" gutterBottom>
+                          {translations.progress}: {Math.round(progress)}%
+                        </Typography>
+                        <LinearProgress variant="determinate" value={progress} />
+                      </Box>
+                    )}
+                    {error && (
+                      <Typography color="error" sx={{ mb: 2 }}>
+                        {translations.error}: {error}
+                      </Typography>
+                    )}
+                    {videoInfo && (
+                      <Card sx={{ mb: 2 }}>
+                        <CardContent>
+                          <Typography variant="h6" gutterBottom>
+                            {videoInfo.title}
+                          </Typography>
+                          <Typography variant="body2" color="textSecondary">
+                            {videoInfo.description}
+                          </Typography>
+                        </CardContent>
+                      </Card>
+                    )}
                   </Box>
-                )}
-
-                {error && (
-                  <Typography color="error" sx={{ mb: 2 }}>
-                    {translations.error}: {error}
-                  </Typography>
-                )}
-
-                {videoInfo && (
-                  <Card sx={{ mb: 2 }}>
-                    <CardContent>
-                      <Typography variant="h6" gutterBottom>
-                        {videoInfo.title}
-                      </Typography>
-                      <Typography variant="body2" color="textSecondary">
-                        {videoInfo.description}
-                      </Typography>
-                    </CardContent>
-                  </Card>
-                )}
+                </Card>
               </Box>
             )}
           </Box>

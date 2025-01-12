@@ -1,0 +1,22 @@
+{
+  "menu": {
+    "file": "文件",
+    "file.new": "新建任务",
+    "file.exit": "退出",
+    "edit": "编辑",
+    "edit.undo": "撤销",
+    "edit.redo": "重做",
+    "edit.cut": "剪切",
+    "edit.copy": "复制",
+    "edit.paste": "粘贴",
+    "view": "视图",
+    "view.reload": "刷新",
+    "view.forcereload": "强制刷新",
+    "view.toggledevtools": "开发者工具",
+    "window": "窗口",
+    "window.minimize": "最小化",
+    "window.close": "关闭",
+    "help": "帮助",
+    "help.about": "关于"
+  }
+}
