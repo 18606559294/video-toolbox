@@ -5,14 +5,13 @@
   "main": "build/electron/main.js",
   "homepage": "./",
   "scripts": {
-    "start": "electron-forge start",
+    "start": "react-scripts start",
     "build": "react-scripts build && node scripts/copy-electron.js",
-    "package": "electron-forge package",
-    "make": "electron-forge make",
-    "publish": "electron-forge publish",
-    "lint": "echo \"No linting configured\"",
-    "postinstall": "electron-builder install-app-deps",
-    "electron:build": "npm run build && electron-builder"
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "electron:dev": "electron .",
+    "electron:build": "npm run build && electron-builder",
+    "postinstall": "electron-builder install-app-deps"
   },
   "build": {
     "appId": "com.videotoolbox.app",
@@ -22,12 +21,10 @@
       "buildResources": "build"
     },
     "files": [
-      "build/**/*",
-      "electron/**/*",
-      "node_modules/**/*"
+      "build/**/*"
     ],
     "extraMetadata": {
-      "main": "electron/main.js"
+      "main": "build/electron/main.js"
     },
     "win": {
       "target": [
@@ -37,8 +34,7 @@
             "x64"
           ]
         }
-      ],
-      "icon": "build/icon.ico"
+      ]
     },
     "nsis": {
       "oneClick": false,

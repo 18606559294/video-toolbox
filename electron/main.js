@@ -17,6 +17,7 @@ if (require('electron-squirrel-startup')) {
 
 // 配置日志
 log.transports.file.level = 'info';
+log.transports.file.resolvePathFn = () => path.join(app.getPath('userData'), 'logs/main.log');
 
 // 主窗口
 let mainWindow = null;
@@ -102,8 +103,15 @@ const createWindow = () => {
     mainWindow.loadURL('http://localhost:3000');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../build/index.html'));
+    // 在生产环境中，使用相对于 app.getAppPath() 的路径
+    const indexPath = path.join(app.getAppPath(), 'build', 'index.html');
+    log.info('Loading index.html from:', indexPath);
+    mainWindow.loadFile(indexPath);
   }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 };
 
 // 初始化应用
