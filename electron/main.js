@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const log = require('electron-log');
 const path = require('path');
 const fs = require('fs');
@@ -22,6 +22,69 @@ log.transports.file.level = 'info';
 let mainWindow = null;
 let downloader = null;
 let i18n = null;
+
+// 创建菜单
+function createMenu(i18nService) {
+  const template = [
+    {
+      label: i18nService.t('menu.file'),
+      submenu: [
+        {
+          label: i18nService.t('menu.file.new'),
+          accelerator: 'CmdOrCtrl+N',
+          click: () => {
+            mainWindow.webContents.send('menu-new-task');
+          }
+        },
+        { type: 'separator' },
+        {
+          label: i18nService.t('menu.file.exit'),
+          role: 'quit'
+        }
+      ]
+    },
+    {
+      label: i18nService.t('menu.edit'),
+      submenu: [
+        { label: i18nService.t('menu.edit.undo'), role: 'undo' },
+        { label: i18nService.t('menu.edit.redo'), role: 'redo' },
+        { type: 'separator' },
+        { label: i18nService.t('menu.edit.cut'), role: 'cut' },
+        { label: i18nService.t('menu.edit.copy'), role: 'copy' },
+        { label: i18nService.t('menu.edit.paste'), role: 'paste' }
+      ]
+    },
+    {
+      label: i18nService.t('menu.view'),
+      submenu: [
+        { label: i18nService.t('menu.view.reload'), role: 'reload' },
+        { label: i18nService.t('menu.view.forcereload'), role: 'forceReload' },
+        { type: 'separator' },
+        { label: i18nService.t('menu.view.toggledevtools'), role: 'toggleDevTools' }
+      ]
+    },
+    {
+      label: i18nService.t('menu.window'),
+      submenu: [
+        { label: i18nService.t('menu.window.minimize'), role: 'minimize' },
+        { label: i18nService.t('menu.window.close'), role: 'close' }
+      ]
+    },
+    {
+      label: i18nService.t('menu.help'),
+      submenu: [
+        {
+          label: i18nService.t('menu.help.about'),
+          click: () => {
+            mainWindow.webContents.send('show-about');
+          }
+        }
+      ]
+    }
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
 
 // 创建窗口
 const createWindow = () => {
@@ -63,6 +126,7 @@ app.on('ready', async () => {
     }
 
     await i18nService.changeLanguage(initialLanguage);
+    createMenu(i18nService); // 创建本地化菜单
 
     i18n = i18nService;
     downloader = new Downloader();
