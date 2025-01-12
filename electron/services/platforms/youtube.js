@@ -1,12 +1,13 @@
-const puppeteer = require('puppeteer-core');
+const ytdl = require('ytdl-core');
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { HttpsProxyAgent } = require('https-proxy-agent');
 
 class YouTube {
   constructor() {
-    this.browser = null;
-    this.page = null;
+    this.proxy = null;
+    this.cookies = '';
     this.userDataDir = path.join(app.getPath('userData'), 'youtube');
     
     // 确保用户数据目录存在
@@ -15,63 +16,110 @@ class YouTube {
     }
   }
 
-  async initBrowser() {
-    if (!this.browser) {
-      this.browser = await puppeteer.launch({
-        executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-        userDataDir: this.userDataDir,
-        headless: false
-      });
+  setProxy(proxyUrl) {
+    this.proxy = proxyUrl;
+    return this;
+  }
+
+  setCookies(cookies) {
+    this.cookies = cookies;
+    return this;
+  }
+
+  async getVideoInfo(url) {
+    try {
+      const options = {
+        requestOptions: {}
+      };
+
+      if (this.proxy) {
+        options.requestOptions.agent = new HttpsProxyAgent(this.proxy);
+      }
+
+      if (this.cookies) {
+        options.requestOptions.headers = {
+          'Cookie': this.cookies
+        };
+      }
+
+      const info = await ytdl.getInfo(url, options);
+      return {
+        title: info.videoDetails.title,
+        author: info.videoDetails.author.name,
+        duration: parseInt(info.videoDetails.lengthSeconds),
+        formats: info.formats.map(format => ({
+          itag: format.itag,
+          quality: format.qualityLabel || format.quality,
+          container: format.container,
+          hasAudio: format.hasAudio,
+          hasVideo: format.hasVideo,
+          contentLength: format.contentLength,
+          url: format.url
+        })),
+        thumbnails: info.videoDetails.thumbnails,
+        description: info.videoDetails.description,
+        platform: 'youtube'
+      };
+    } catch (error) {
+      console.error('获取YouTube视频信息失败:', error);
+      throw error;
     }
+  }
+
+  async download(url, options = {}) {
+    try {
+      const downloadOptions = {
+        quality: options.quality || 'highest',
+        filter: options.format === 'audio' ? 'audioonly' : 'videoandaudio',
+        requestOptions: {}
+      };
+
+      if (this.proxy) {
+        downloadOptions.requestOptions.agent = new HttpsProxyAgent(this.proxy);
+      }
+
+      if (this.cookies) {
+        downloadOptions.requestOptions.headers = {
+          'Cookie': this.cookies
+        };
+      }
+
+      const stream = ytdl(url, downloadOptions);
+      
+      // 添加错误处理
+      stream.on('error', (error) => {
+        console.error('YouTube下载错误:', error);
+        throw error;
+      });
+
+      return stream;
+    } catch (error) {
+      console.error('YouTube下载失败:', error);
+      throw error;
+    }
+  }
+
+  validateUrl(url) {
+    return ytdl.validateURL(url);
+  }
+
+  getVideoId(url) {
+    return ytdl.getVideoID(url);
   }
 
   async login(credentials) {
     try {
-      await this.initBrowser();
-      
-      // 创建新页面
-      this.page = await this.browser.newPage();
-      
-      // 设置视窗大小
-      await this.page.setViewport({ width: 1280, height: 800 });
-
-      // 如果有保存的cookies，尝试使用cookies登录
-      if (credentials.cookies) {
-        await this.page.setCookie(...credentials.cookies);
-        await this.page.goto('https://www.youtube.com');
-        
-        // 检查是否已登录
-        const isLoggedIn = await this.checkLoginStatus();
-        if (isLoggedIn) {
-          return true;
-        }
-      }
-
       // 使用账号密码登录
-      await this.page.goto('https://accounts.google.com/signin/v2/identifier?service=youtube');
-      
-      // 输入邮箱
-      await this.page.type('input[type="email"]', credentials.username);
-      await this.page.click('#identifierNext');
-      
-      // 等待密码输入框
-      await this.page.waitForSelector('input[type="password"]', { visible: true });
-      
-      // 输入密码
-      await this.page.type('input[type="password"]', credentials.password);
-      await this.page.click('#passwordNext');
-      
-      // 等待登录完成
-      await this.page.waitForNavigation();
-      
-      // 验证登录状态
-      const isLoggedIn = await this.checkLoginStatus();
-      if (!isLoggedIn) {
-        throw new Error('登录失败');
+      const options = {
+        requestOptions: {}
+      };
+
+      if (this.proxy) {
+        options.requestOptions.agent = new HttpsProxyAgent(this.proxy);
       }
 
-      // 保存cookies
-      const cookies = await this.page.cookies();
+      const cookies = await ytdl.getCookies('https://www.youtube.com', options, credentials);
+      this.cookies = cookies;
       return {
         cookies,
         timestamp: Date.now()
@@ -79,62 +127,17 @@ class YouTube {
     } catch (error) {
       console.error('YouTube 登录失败:', error);
       throw error;
-    } finally {
-      if (this.page) {
-        await this.page.close();
-        this.page = null;
-      }
     }
   }
 
   async logout() {
     try {
-      await this.initBrowser();
-      this.page = await this.browser.newPage();
-      
-      // 转到YouTube
-      await this.page.goto('https://www.youtube.com');
-      
-      // 点击头像按钮
-      await this.page.click('button#avatar-btn');
-      
-      // 等待并点击登出按钮
-      await this.page.waitForSelector('a[href="/logout"]');
-      await this.page.click('a[href="/logout"]');
-      
-      // 等待登出完成
-      await this.page.waitForNavigation();
-      
       // 清除cookies
-      const client = await this.page.target().createCDPSession();
-      await client.send('Network.clearBrowserCookies');
-      
+      this.cookies = '';
       return true;
     } catch (error) {
       console.error('YouTube 登出失败:', error);
       throw error;
-    } finally {
-      if (this.page) {
-        await this.page.close();
-        this.page = null;
-      }
-    }
-  }
-
-  async checkLoginStatus() {
-    try {
-      // 检查是否存在上传按钮（只有登录用户才能看到）
-      const uploadButton = await this.page.$('ytd-button-renderer#upload-button');
-      return !!uploadButton;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  async closeBrowser() {
-    if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
     }
   }
 }
