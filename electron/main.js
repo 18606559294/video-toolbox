@@ -2,9 +2,14 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const log = require('electron-log');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const isDev = process.env.NODE_ENV !== 'production';
 const Downloader = require('./services/downloader');
 const I18nService = require('./services/i18n');
+
+// 配置HTTPS全局设置
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '1';
+https.globalAgent.options.rejectUnauthorized = true;
 
 if (require('electron-squirrel-startup')) {
   app.quit();
@@ -166,6 +171,20 @@ ipcMain.handle('get-translation', async (event, key, options) => {
 // 下载相关
 ipcMain.handle('get-supported-platforms', () => {
   return downloader.getSupportedPlatforms();
+});
+
+// 代理设置相关
+ipcMain.handle('set-proxy', async (event, proxyConfig) => {
+  try {
+    downloader.setProxy(proxyConfig);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('get-proxy-config', () => {
+  return downloader.proxy;
 });
 
 ipcMain.handle('get-video-info', async (event, url) => {

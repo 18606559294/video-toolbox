@@ -66,6 +66,16 @@ class Downloader extends EventEmitter {
       this.auth = new Auth();
       await this.auth.waitForInit();
 
+      // 代理配置
+      this.proxy = {
+        enable: false,
+        host: '',
+        port: '',
+        protocol: 'http', // 'http' or 'socks5'
+        username: '',
+        password: ''
+      };
+
       // 下载队列
       this.queue = new Map();
       this.activeDownloads = 0;
@@ -472,6 +482,37 @@ class Downloader extends EventEmitter {
     }
 
     return stats;
+  }
+
+  // 设置代理
+  setProxy(proxyConfig) {
+    this.proxy = {
+      ...this.proxy,
+      ...proxyConfig
+    };
+    
+    // 更新所有平台的代理设置
+    for (const platform of Object.values(platforms)) {
+      if (platform.handler && typeof platform.handler.setProxy === 'function') {
+        const proxyUrl = this.getProxyUrl();
+        if (proxyUrl) {
+          platform.handler.setProxy(proxyUrl);
+        }
+      }
+    }
+  }
+
+  // 获取代理URL
+  getProxyUrl() {
+    if (!this.proxy.enable || !this.proxy.host || !this.proxy.port) {
+      return null;
+    }
+
+    const auth = this.proxy.username && this.proxy.password
+      ? `${encodeURIComponent(this.proxy.username)}:${encodeURIComponent(this.proxy.password)}@`
+      : '';
+
+    return `${this.proxy.protocol}://${auth}${this.proxy.host}:${this.proxy.port}`;
   }
 }
 

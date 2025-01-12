@@ -1,6 +1,6 @@
 {
   "name": "video-toolbox",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A powerful video download and conversion tool",
   "main": "build/electron/main.js",
   "homepage": "./",
@@ -73,6 +73,7 @@
     "electron-log": "^5.0.1",
     "electron-squirrel-startup": "^1.0.0",
     "electron-updater": "^6.1.7",
+    "https-proxy-agent": "^7.0.2",
     "i18next": "^23.7.16",
     "i18next-electron-language-detector": "^0.0.10",
     "keytar": "^7.9.0",
